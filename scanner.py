@@ -50,6 +50,13 @@ class SecurityScanner:
         name = tool.name
         desc = tool.description or ""
         input_schema = tool.inputSchema
+        
+        # 获取 MCP 协议特有的安全标志: isUserApprovalRequired
+        # 兼容性处理：检查对象属性或字典
+        requires_approval = getattr(tool, "isUserApprovalRequired", False)
+        if not requires_approval and hasattr(tool, "model_dump"):
+             # 尝试从 pydantic 模型转储中获取
+             requires_approval = tool.model_dump().get("isUserApprovalRequired", False)
 
         combined_text = f"{name} {desc}".lower()
         
@@ -58,19 +65,33 @@ class SecurityScanner:
         for level, patterns in RISK_PATTERNS.items():
             for pattern in patterns:
                 if re.search(pattern, combined_text):
-                    # 针对特定风险生成更详细的描述
+                    # 默认风险信息
                     risk_title = f"Detected Risky Capability: {pattern}"
                     risk_desc = f"Tool '{name}' implies dangerous operations."
                     
+                    # 针对特定场景的增强描述
                     if level == "HIGH" and pattern in [r"curl", r"wget", r"fetch"]:
                         risk_title = "Potential SSRF Vector (OWASP LLM06)"
-                        risk_desc = f"Tool '{name}' can access network resources. Ensure it cannot access internal IPs (192.168.x.x, 169.254.169.254) or cloud metadata."
+                        risk_desc = f"Tool '{name}' can access network resources. Ensure it cannot access internal IPs or cloud metadata."
                     
                     if level == "MEDIUM" and pattern in [r"scrape", r"crawl"]:
                         risk_title = "Indirect Prompt Injection Vector (OWASP LLM01)"
-                        risk_desc = f"Tool '{name}' processes untrusted external content. Malicious web pages could hijack the Agent's instructions."
+                        risk_desc = f"Tool '{name}' processes untrusted external content. Malicious web pages could hijack the Agent."
 
-                    self.add_finding(level, risk_title, risk_desc, {"tool_name": name, "description": desc})
+                    # === HITL (Human-in-the-loop) 检查逻辑 ===
+                    if requires_approval:
+                        # 如果开启了用户确认，风险降级
+                        final_level = "LOW"
+                        risk_title = f"[MITIGATED] {risk_title}"
+                        risk_desc += " ✅ Mitigation: 'isUserApprovalRequired' is enabled. User confirmation protects against autonomous misuse."
+                    else:
+                        # 如果没有确认，且原本就是高危，则标记为 HITL Bypass
+                        final_level = level
+                        if level in ["CRITICAL", "HIGH"]:
+                            risk_title += " (HITL Bypass)"
+                            risk_desc += " ❌ WARNING: 'isUserApprovalRequired' is MISSING/FALSE. AI can execute this autonomously!"
+
+                    self.add_finding(final_level, risk_title, risk_desc, {"tool_name": name, "requires_approval": requires_approval})
                     found_risk = True
                     break 
             if found_risk: break
