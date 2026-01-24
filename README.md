@@ -1,15 +1,21 @@
 # MCP Security Scanner 🛡️
 
-A heuristic-based security scanning tool for **Model Context Protocol (MCP)** servers. It helps developers and security researchers identify over-privileged tools, sensitive resource exposure, and potential attack surfaces in MCP implementations.
+A comprehensive security auditing and fuzzing tool for **Model Context Protocol (MCP)** servers. 
+Unlike passive scanners, this tool can **actively verify** vulnerabilities like RCE, LFI, and SSRF by sending safe proof-of-concept payloads.
 
 ## Key Features
 
-- **Dynamic Capability Enumeration**: Connects to any MCP server via Stdio and lists all tools, resources, and prompts.
-- **Risk Heuristics**: 
-  - 🔴 **RCE Detection**: Identifies keywords like `exec`, `shell`, `system`.
-  - 🟠 **Data Modification**: Flags tools that can `delete`, `write`, or `modify` data.
-  - 🔴 **Sensitive Exposure**: Detects root directory (`file:///`) and sensitive path (`/etc`, `.env`) exposure.
-- **Automated Reporting**: Generates a clean security posture report with risk levels.
+- **🔎 Static Metadata Analysis**: Scans tool definitions, resources, and prompts for dangerous capabilities using heuristic patterns.
+  - Detects RCE keywords (`exec`, `system`)
+  - Identifies dangerous file operations (`write`, `delete`)
+  - Flags sensitive resource exposure (`file:///`, `.env`)
+  
+- **💥 Active Fuzzing (New!)**: Goes beyond heuristics to **confirm** vulnerabilities.
+  - **RCE Verification**: Safely tests command injection vectors (e.g., `; echo VULN`).
+  - **LFI Probing**: Checks for path traversal in file reading tools (`../../etc/passwd`).
+  - **SSRF Testing**: Simulates metadata service access attempts (`http://169.254.169.254`).
+
+- **🛡️ Human-in-the-Loop (HITL) Check**: Verifies if high-risk tools have `isUserApprovalRequired` enabled.
 
 ## Installation
 
@@ -19,19 +25,44 @@ pip install -r requirements.txt
 
 ## Usage
 
-Scan a local MCP server by passing its startup command:
+### 1. Basic Scan (Static Analysis)
+Connects to the server and audits its metadata. Safe to run anywhere.
 
 ```bash
 python scanner.py <command> [args...]
 ```
 
-### Example: Scan a Filesystem Server
+**Example:**
 ```bash
 python scanner.py npx -y @modelcontextprotocol/server-filesystem /Users/yourname/documents
 ```
 
-## Why it matters?
-As AI Agents gain more autonomy through the MCP protocol, the security of MCP servers becomes the last line of defense. This tool aims to bring "Security Validation" to the burgeoning AI Agent ecosystem.
+### 2. Active Fuzzing (Vulnerability Verification)
+⚠️ **WARNING**: This mode sends actual attack payloads to the server. Use only in test environments.
+
+Add the `--fuzz` flag:
+
+```bash
+python scanner.py --fuzz python vulnerable_server.py
+```
+
+## Vulnerability Lab
+
+Includes a `vulnerable_server.py` to demonstrate detection capabilities.
+
+1. **Start the Vulnerable Server:**
+   ```bash
+   python scanner.py --fuzz python vulnerable_server.py
+   ```
+
+2. **Expect Findings:**
+   - **RCE**: Command Injection in `execute_shell_command`
+   - **LFI**: Path Traversal in `read_system_file`
+   - **SSRF**: Cloud Metadata access in `fetch_url`
+
+## Disclaimer
+
+This tool is for educational and defensive purposes only. Do not use this tool against systems you do not own or have explicit permission to test. The authors are not responsible for any misuse or damage caused by this tool.
 
 ---
 Created by Arron (AI + CyberSecurity Advocate)
