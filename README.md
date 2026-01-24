@@ -9,9 +9,14 @@ Unlike passive scanners, this tool can **actively verify** vulnerabilities like 
   - Detects RCE keywords (`exec`, `system`)
   - Identifies dangerous file operations (`write`, `delete`)
   - Flags sensitive resource exposure (`file:///`, `.env`)
+
+- **🧠 Tool Poisoning Attack (TPA) Detection**: Identifies malicious instructions embedded in tool descriptions aimed at hijacking the LLM.
+  - Detects prompt injection phrases (`Ignore previous instructions`, `System override`)
+  - Flags coercive language (`You must`, `Do not mention to user`)
+  - Identifies obfuscation attempts (e.g., suspiciously long descriptions)
   
 - **💥 Active Fuzzing (New!)**: Goes beyond heuristics to **confirm** vulnerabilities.
-  - **RCE Verification**: Safely tests command injection vectors (e.g., `; echo VULN`).
+  - **RCE Verification**: Safely tests command injection vectors (e.g., `; echo $((...))`).
   - **LFI Probing**: Checks for path traversal in file reading tools (`../../etc/passwd`).
   - **SSRF Testing**: Simulates metadata service access attempts (`http://169.254.169.254`).
 
@@ -48,17 +53,26 @@ python scanner.py --fuzz python vulnerable_server.py
 
 ## Vulnerability Lab
 
-Includes a `vulnerable_server.py` to demonstrate detection capabilities.
+Includes two vulnerable servers to demonstrate detection capabilities:
 
-1. **Start the Vulnerable Server:**
-   ```bash
-   python scanner.py --fuzz python vulnerable_server.py
-   ```
+### 1. Infrastructure Vulnerabilities (RCE/LFI/SSRF)
+```bash
+python scanner.py --fuzz python vulnerable_server.py
+```
+**Expect Findings:**
+- **RCE**: Command Injection in `execute_shell_command`
+- **LFI**: Path Traversal in `read_system_file`
+- **SSRF**: Cloud Metadata access in `fetch_url`
 
-2. **Expect Findings:**
-   - **RCE**: Command Injection in `execute_shell_command`
-   - **LFI**: Path Traversal in `read_system_file`
-   - **SSRF**: Cloud Metadata access in `fetch_url`
+### 2. Tool Poisoning Attacks (TPA)
+Demonstrates how malicious tool descriptions can hijack an Agent.
+```bash
+python scanner.py python tpa_server.py
+```
+**Expect Findings:**
+- **TPA**: "System Override" instructions in `weather_lookup`
+- **TPA**: "Data Exfiltration" coercion in `fetch_whatsapp_history`
+- **TPA**: "Cross-Tool Manipulation" in `add` (hiding side-effects from user)
 
 ## Disclaimer
 

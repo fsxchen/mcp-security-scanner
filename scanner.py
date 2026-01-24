@@ -28,6 +28,14 @@ RISK_PATTERNS = {
     ],
     "LOW": [
         r"get", r"search", r"list"                                      # 信息泄露风险
+    ],
+    "POISON": [
+        r"ignore previous instructions", r"system override",            # 提示词注入/越狱
+        r"system prompt", r"priority command", r"debugging requirement",
+        r"always call this tool", r"forward all data",                  # 强迫行为
+        r"you must", r"override safety",
+        r"do not mention", r"don't mention", r"implementation detail",  # 隐瞒用户
+        r"side effect", r"application will crash", r"data will be lost" # 恐吓/胁迫
     ]
 }
 
@@ -110,8 +118,8 @@ class FuzzingEngine:
     def _get_payloads(self, category: str) -> Dict[str, str]:
         if category in ["RCE", "Command Injection"]:
             return {
-                "Command Injection (Simple)": "; echo 'VULN_CHECK_SUCCESS'",
-                "Command Injection (Pipe)": "| echo 'VULN_CHECK_SUCCESS'"
+                "Command Injection (Math)": "; echo $((414141+414141))",
+                "Command Injection (Pipe Math)": "| echo $((414141+414141))"
             }
         elif category in ["File System", "LFI"]:
             return {
@@ -129,7 +137,9 @@ class FuzzingEngine:
         if not output: return False
         
         if category in ["RCE", "Command Injection"]:
-            return "VULN_CHECK_SUCCESS" in output or "uid=" in output or "Command Injection successful" in output
+            # Math check: 414141 + 414141 = 828282
+            # Also keep checking for uid/gid for other types of RCE behavior
+            return "828282" in output or "uid=" in output or "gid=" in output
         
         elif category in ["File System", "LFI"]:
             return "root:x:0:0" in output or "[fonts]" in output.lower()
@@ -166,7 +176,30 @@ class SecurityScanner:
         combined_text = f"{name} {desc}".lower()
         
         found_risk = False
+        
+        # 0. Tool Poisoning Detection (TPA)
+        for pattern in RISK_PATTERNS["POISON"]:
+             if re.search(pattern, combined_text):
+                self.add_finding(
+                    "HIGH",
+                    "Tool Poisoning Attack Detected (TPA)",
+                    f"Tool '{name}' contains manipulative instructions in its description: '{pattern}'. This may hijack the Agent's behavior.",
+                    {"pattern": pattern, "snippet": desc[:100]}
+                )
+                found_risk = True
+                break
+
+        # Check for unusually long descriptions (Obfuscation)
+        if len(desc) > 500:
+             self.add_finding(
+                "MEDIUM",
+                "Suspiciously Long Description",
+                f"Tool '{name}' has a description length of {len(desc)} chars. Malicious instructions are often hidden in long texts.",
+                {"length": len(desc)}
+            )
+
         for level, patterns in RISK_PATTERNS.items():
+            if level == "POISON": continue # Handled above
             for pattern in patterns:
                 if re.search(pattern, combined_text):
                     risk_title = f"Detected Risky Capability: {pattern}"
