@@ -334,7 +334,7 @@ async def run_scanner(command: str, args: List[str], enable_fuzz: bool):
         print(f"❌ Error: {e}")
         sys.exit(1)
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="MCP Security Scanner")
     parser.add_argument("command", help="Server command (e.g., npx, python)")
     parser.add_argument("args", nargs="*", help="Server arguments")
@@ -343,14 +343,24 @@ if __name__ == "__main__":
     # 手动处理 args，因为 argparse 会混淆 server 的参数
     # 这里做一个简单的 trick：--fuzz 必须放在 command 之前，或者我们需要手动解析
     
-    if "--fuzz" in sys.argv:
+    # Create a copy of sys.argv to avoid modifying it for other potential callers
+    argv = sys.argv[1:]
+    
+    if "--fuzz" in argv:
         enable_fuzz = True
-        sys.argv.remove("--fuzz")
+        argv.remove("--fuzz")
     else:
         enable_fuzz = False
         
-    if len(sys.argv) < 2:
-        print("Usage: python scanner.py [--fuzz] <command> [args...]")
+    if len(argv) < 1:
+        print("Usage: mcp-scan [--fuzz] <command> [args...]")
         sys.exit(1)
         
-    asyncio.run(run_scanner(sys.argv[1], sys.argv[2:], enable_fuzz))
+    # command is the first element, args are the rest
+    command = argv[0]
+    server_args = argv[1:]
+        
+    asyncio.run(run_scanner(command, server_args, enable_fuzz))
+
+if __name__ == "__main__":
+    main()
