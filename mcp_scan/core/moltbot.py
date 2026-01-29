@@ -5,6 +5,100 @@ import struct
 from urllib.parse import urlparse
 from mcp_scan.utils.patterns import MOLTBOT_SIGNATURES, MOLTBOT_PORTS, MOLTBOT_MDNS_SIGNATURES
 
+class DNSParser:
+    def __init__(self, data):
+        self.data = data
+        self.offset = 0
+
+    def parse_name(self):
+        labels = []
+        loop_detection = 0
+        tmp_offset = self.offset
+        jumped = False
+        
+        while True:
+            if tmp_offset >= len(self.data): break
+            length = self.data[tmp_offset]
+            
+            if length == 0:
+                if not jumped: self.offset = tmp_offset + 1
+                break
+            
+            if (length & 0xC0) == 0xC0: # Pointer
+                if tmp_offset + 2 > len(self.data): break
+                pointer = struct.unpack("!H", self.data[tmp_offset:tmp_offset+2])[0] & 0x3FFF
+                if not jumped: self.offset = tmp_offset + 2
+                tmp_offset = pointer
+                jumped = True
+                loop_detection += 1
+                if loop_detection > 10: break # Prevent loops
+                continue
+                
+            tmp_offset += 1
+            if tmp_offset + length > len(self.data): break
+            labels.append(self.data[tmp_offset:tmp_offset+length])
+            tmp_offset += length
+            if not jumped: self.offset = tmp_offset
+            
+        try:
+            return b".".join(labels).decode('utf-8', errors='ignore')
+        except:
+            return "<invalid-name>"
+
+    def skip_header(self):
+        self.offset = 12 # Header is 12 bytes
+
+    def skip_questions(self, q_count):
+        for _ in range(q_count):
+            self.parse_name()
+            self.offset += 4 # Type(2) + Class(2)
+
+    def parse_records(self, count):
+        records = []
+        for _ in range(count):
+            if self.offset >= len(self.data): break
+            name = self.parse_name()
+            # Type(2), Class(2), TTL(4), RDLENGTH(2)
+            if self.offset + 10 > len(self.data): break
+            rtype, rclass, ttl, rdlen = struct.unpack("!HHIH", self.data[self.offset:self.offset+10])
+            self.offset += 10
+            
+            rdata_start = self.offset
+            rdata_val = None
+            
+            try:
+                if rtype == 12: # PTR
+                    parser_sub = DNSParser(self.data)
+                    parser_sub.offset = self.offset
+                    rdata_val = parser_sub.parse_name()
+                elif rtype == 33: # SRV
+                    # Priority(2), Weight(2), Port(2), Target(Name)
+                    # We need to be careful with offset calculation inside rdata
+                    if rdlen >= 6:
+                        parser_sub = DNSParser(self.data)
+                        parser_sub.offset = self.offset + 6
+                        target = parser_sub.parse_name()
+                        port = struct.unpack("!H", self.data[self.offset+4:self.offset+6])[0]
+                        rdata_val = {"target": target, "port": port}
+                elif rtype == 16: # TXT
+                    # TXT records are sequence of <len><text>
+                    txt_parts = []
+                    curr = self.offset
+                    end = self.offset + rdlen
+                    while curr < end:
+                        tlen = self.data[curr]
+                        curr += 1
+                        if curr + tlen > end: break
+                        txt_parts.append(self.data[curr:curr+tlen].decode('utf-8', errors='ignore'))
+                        curr += tlen
+                    rdata_val = txt_parts
+            except Exception:
+                rdata_val = "<parse-error>"
+
+            self.offset = rdata_start + rdlen
+            records.append({"name": name, "type": rtype, "data": rdata_val})
+        return records
+
 class MoltbotScanner:
     def __init__(self, target: str, timeout: int = 5):
         self.target = target
@@ -37,47 +131,84 @@ class MoltbotScanner:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(self.timeout)
-            
-            # Use run_in_executor for blocking socket calls if necessary, 
-            # but for a single send/recv with timeout, a simple implementation is fine.
-            # However, to be fully async-friendly:
             sock.setblocking(False)
             
             await loop.sock_sendto(sock, query, (host, port))
             
-            # Second query for common HTTP services
+            # Second query for common HTTP services (likely to return SRV/TXT in additionals)
             query_http = self._create_dns_query("_http._tcp.local", 12)
             await loop.sock_sendto(sock, query_http, (host, port))
 
+            # Also try querying specific known services if we suspect Moltbot
+            query_molt = self._create_dns_query("_clawdbot-gw._tcp.local", 12)
+            await loop.sock_sendto(sock, query_molt, (host, port))
+
             # Buffer for response
-            data = bytearray(1024)
-            # Wait for response with timeout
             try:
-                # We use a simple loop and wait_for to simulate timeout for recvfrom
-                # since sock_recvfrom doesn't take a timeout.
-                resp_data, addr = await asyncio.wait_for(loop.sock_recvfrom(sock, 1024), timeout=self.timeout)
-                printable = "".join([chr(b) if 32 <= b <= 126 else "." for b in resp_data])
-                
-                is_match = False
-                for sig in MOLTBOT_MDNS_SIGNATURES:
-                    if sig.lower() in printable.lower():
-                        is_match = True
+                # Allow receiving multiple packets
+                end_time = loop.time() + self.timeout
+                while True:
+                    remaining = end_time - loop.time()
+                    if remaining <= 0: break
+                    
+                    try:
+                        resp_data, addr = await asyncio.wait_for(loop.sock_recvfrom(sock, 4096), timeout=remaining)
+                    except asyncio.TimeoutError:
                         break
-                
-                if is_match:
-                    print(f"  [!] 🚨 LEAK DETECTED: Found ClawdBot/Moltbot via mDNS on {host}:{port}!")
-                    self.results.append({
-                        "port": port,
-                        "url": f"udp://{host}:{port}",
-                        "type": "mDNS Information Leak",
-                        "severity": "HIGH",
-                        "details": f"Target is responding to mDNS queries with service signature: {printable[:50]}..."
-                    })
-            except asyncio.TimeoutError:
-                pass # No mDNS response
+
+                    # Quick ASCII check for signatures
+                    printable = "".join([chr(b) if 32 <= b <= 126 else "." for b in resp_data])
+                    is_match = False
+                    for sig in MOLTBOT_MDNS_SIGNATURES:
+                        if sig.lower() in printable.lower():
+                            is_match = True
+                            break
+                    
+                    if is_match:
+                        # Full Parse
+                        parser = DNSParser(resp_data)
+                        try:
+                            # Header
+                            if len(resp_data) < 12: continue
+                            header = struct.unpack("!HHHHHH", resp_data[:12])
+                            qdcount, ancount, nscount, arcount = header[2], header[3], header[4], header[5]
+                            
+                            parser.skip_header()
+                            parser.skip_questions(qdcount)
+                            records = parser.parse_records(ancount + nscount + arcount)
+                            
+                            details_lines = []
+                            for rec in records:
+                                if rec['type'] == 12: # PTR
+                                    details_lines.append(f"Service Instance: {rec['data']}")
+                                elif rec['type'] == 33: # SRV
+                                    data = rec['data']
+                                    if isinstance(data, dict):
+                                        details_lines.append(f"Target Host: {data['target']} (Port {data['port']})")
+                                elif rec['type'] == 16: # TXT
+                                    if isinstance(rec['data'], list):
+                                        txt_str = ", ".join(rec['data'])
+                                        details_lines.append(f"Metadata: {txt_str}")
+
+                            details_str = "\n   ".join(details_lines) if details_lines else f"Raw: {printable[:50]}..."
+                            
+                            print(f"  [!] 🚨 LEAK DETECTED: Found ClawdBot/Moltbot via mDNS on {host}:{port}!")
+                            self.results.append({
+                                "port": port,
+                                "url": f"udp://{host}:{port}",
+                                "type": "mDNS Information Leak",
+                                "severity": "HIGH",
+                                "details": f"Target leaking internal network info:\n   {details_str}"
+                            })
+                            # If we found a match, we can stop or keep looking for more packets
+                            break 
+                        except Exception as e:
+                            # Fallback
+                            print(f"  [!] Parse error but signature found: {e}")
+            except Exception:
+                pass
                 
         except Exception as e:
-            # print(f"  [-] mDNS probe error: {e}")
             pass
         finally:
             sock.close()
