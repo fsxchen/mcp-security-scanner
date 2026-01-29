@@ -1,3 +1,29 @@
+Metadata-Version: 2.4
+Name: mcp-security-scanner
+Version: 0.2.0
+Summary: A comprehensive security auditing and fuzzing tool for Model Context Protocol (MCP) servers.
+Author: Arron
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Testing
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: mcp>=1.0.0
+Requires-Dist: aiohttp
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
 # MCP Security Scanner 🛡️
 
 A comprehensive security auditing and fuzzing tool for **Model Context Protocol (MCP)** servers. 
@@ -20,10 +46,7 @@ Unlike passive scanners, this tool can **actively verify** vulnerabilities like 
   - **LFI Probing**: Checks for path traversal in file reading tools (`../../etc/passwd`).
   - **SSRF Testing**: Simulates metadata service access attempts (`http://169.254.169.254`).
 
-- **🤖 Moltbot/ClawdBot Infrastructure Scan**: Detects exposed and misconfigured personal AI agent instances.
-  - **TCP Port Audit**: Scans for default Gateway (18789) and Admin Console (8080) ports.
-  - **UDP mDNS Probing (New!)**: Identifies hidden services via unicast mDNS queries on port 5353.
-  - **Auth Bypass Verification**: Checks if the dashboard is accessible without authentication.
+- **🛡️ Human-in-the-Loop (HITL) Check**: Verifies if high-risk tools have `isUserApprovalRequired` enabled.
 
 ## Installation
 
