@@ -1,83 +1,83 @@
 # MCP Security Scanner 🛡️
 
-A comprehensive security auditing and fuzzing tool for **Model Context Protocol (MCP)** servers. 
-Unlike passive scanners, this tool can **actively verify** vulnerabilities like RCE, LFI, and SSRF by sending safe proof-of-concept payloads.
+A comprehensive security auditing framework for the **Model Context Protocol (MCP)** ecosystem. 
+It protects against two main vectors: **Application Vulnerabilities** (in MCP Servers) and **Infrastructure Exposure** (in AI Agents like Moltbot/ClawdBot).
 
-## Key Features
+## 🚀 Key Features
 
-- **🔎 Static Metadata Analysis**: Scans tool definitions, resources, and prompts for dangerous capabilities using heuristic patterns.
-  - Detects RCE keywords (`exec`, `system`)
-  - Identifies dangerous file operations (`write`, `delete`)
-  - Flags sensitive resource exposure (`file:///`, `.env`)
-
+### 1. MCP Server Auditing (`check` mode)
+- **🔎 Static Analysis**: Scans tool definitions, resources, and prompts for dangerous capabilities.
+  - Detects RCE keywords (`exec`, `system`), dangerous file ops, and sensitive resource exposure.
 - **🧠 Tool Poisoning Attack (TPA) Detection**: Identifies malicious instructions embedded in tool descriptions aimed at hijacking the LLM.
-  - Detects prompt injection phrases (`Ignore previous instructions`, `System override`)
-  - Flags coercive language (`You must`, `Do not mention to user`)
-  - Identifies obfuscation attempts (e.g., suspiciously long descriptions)
-  
-- **💥 Active Fuzzing (New!)**: Goes beyond heuristics to **confirm** vulnerabilities.
-  - **RCE Verification**: Safely tests command injection vectors (e.g., `; echo $((...))`).
-  - **LFI Probing**: Checks for path traversal in file reading tools (`../../etc/passwd`).
+  - Flags prompt injection phrases (`Ignore previous instructions`), coercive language (`You must`), and cross-tool manipulation.
+- **💥 Active Fuzzing**: Goes beyond heuristics to **confirm** vulnerabilities (requires `--fuzz`).
+  - **RCE Verification**: Safely tests command injection (e.g., `; echo $((...))`).
+  - **LFI Probing**: Checks for path traversal (`../../etc/passwd`).
   - **SSRF Testing**: Simulates metadata service access attempts (`http://169.254.169.254`).
 
-- **🤖 Moltbot/ClawdBot Infrastructure Scan**: Detects exposed and misconfigured personal AI agent instances.
-  - **TCP Port Audit**: Scans for default Gateway (18789) and Admin Console (8080) ports.
-  - **UDP mDNS Probing (New!)**: Identifies hidden services via unicast mDNS queries on port 5353.
+### 2. Infrastructure Scanning (`moltbot` mode)
+- **🤖 Moltbot/ClawdBot Discovery**: Detects exposed personal AI agent instances.
+  - **TCP Port Audit**: Scans for default Gateway (18789) and Admin Console (8080).
+  - **UDP mDNS Probing**: Identifies hidden services via unicast mDNS queries on port 5353 (leaking `_clawdbot-gw._tcp`).
   - **Auth Bypass Verification**: Checks if the dashboard is accessible without authentication.
 
-## Installation
+## 📦 Installation
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/your-username/mcp-security-scanner.git
+cd mcp-security-scanner
+pip install .
 ```
 
-## Usage
+*Note: Requires Python 3.8+*
 
-### 1. Basic Scan (Static Analysis)
-Connects to the server and audits its metadata. Safe to run anywhere.
+## 🛠️ Usage
+
+The tool provides a unified CLI `mcp-scan` with two subcommands:
+
+### Mode 1: Audit an MCP Server (`check`)
+
+Scans a local MCP server by running its command.
+
+**Basic Static Scan (Safe):**
+```bash
+mcp-scan check npx -y @modelcontextprotocol/server-filesystem /Users/demo
+```
+
+**Active Fuzzing (Vulnerability Verification):**
+⚠️ *WARNING: Sends actual attack payloads. Only use in test environments.*
+```bash
+mcp-scan check --fuzz python labs/vulnerable_server.py
+```
+
+### Mode 2: Scan Infrastructure (`moltbot`)
+
+Scans a target IP for exposed AI Agent services (Moltbot/ClawdBot).
 
 ```bash
-python scanner.py <command> [args...]
+mcp-scan moltbot <TARGET_IP>
 ```
 
 **Example:**
 ```bash
-python scanner.py npx -y @modelcontextprotocol/server-filesystem /Users/yourname/documents
+mcp-scan moltbot 192.168.1.10
 ```
+*Detects: Unauthenticated Admin Panels, Open API Gateways, and mDNS leaks.*
 
-### 2. Active Fuzzing (Vulnerability Verification)
-⚠️ **WARNING**: This mode sends actual attack payloads to the server. Use only in test environments.
+## 🧪 Vulnerability Labs
 
-Add the `--fuzz` flag:
+The project includes vulnerable servers in the `labs/` directory for testing:
 
-```bash
-python scanner.py --fuzz python vulnerable_server.py
-```
+1.  **Infrastructure Vulnerabilities (RCE/LFI/SSRF)**:
+    ```bash
+    mcp-scan check --fuzz python labs/vulnerable_server.py
+    ```
+2.  **Tool Poisoning Attacks (TPA)**:
+    ```bash
+    mcp-scan check python labs/tpa_server.py
+    ```
 
-## Vulnerability Lab
-
-Includes two vulnerable servers to demonstrate detection capabilities:
-
-### 1. Infrastructure Vulnerabilities (RCE/LFI/SSRF)
-```bash
-python scanner.py --fuzz python vulnerable_server.py
-```
-**Expect Findings:**
-- **RCE**: Command Injection in `execute_shell_command`
-- **LFI**: Path Traversal in `read_system_file`
-- **SSRF**: Cloud Metadata access in `fetch_url`
-
-### 2. Tool Poisoning Attacks (TPA)
-Demonstrates how malicious tool descriptions can hijack an Agent.
-```bash
-python scanner.py python tpa_server.py
-```
-**Expect Findings:**
-- **TPA**: "System Override" instructions in `weather_lookup`
-- **TPA**: "Data Exfiltration" coercion in `fetch_whatsapp_history`
-- **TPA**: "Cross-Tool Manipulation" in `add` (hiding side-effects from user)
-
-## Disclaimer
+## 📜 Disclaimer
 
 This tool is for educational and defensive purposes only. Do not use this tool against systems you do not own or have explicit permission to test. The authors are not responsible for any misuse or damage caused by this tool.
 
